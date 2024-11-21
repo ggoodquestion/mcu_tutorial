@@ -19,6 +19,9 @@ static const adc1_channel_t adc_channel = ADC1_CHANNEL_6;
 static const int i2s_num = I2S_NUM_0;
 static uint8_t buff[128];
 
+static short signal_mem[1];
+static const float alpha = 0.97;
+
 static esp_err_t init_i2s(){
     esp_err_t err;
 
@@ -58,6 +61,13 @@ static void init_adc(void){
     adc1_config_channel_atten(adc_channel, ADC_ATTEN_DB_11);
 }
 
+u_int16_t preemphasis(uint16_t x){
+    float x_em = 0;
+    x_em = (short) x - alpha * signal_mem[0];
+    signal_mem[0] = (short) x;
+    return (uint16_t) x_em;
+}
+
 void app_main() {
     esp_err_t ret;
     const TickType_t xDelay = 0.0625 / portTICK_PERIOD_MS; // 16000 sample rates
@@ -68,15 +78,21 @@ void app_main() {
         printf("err: %s", esp_err_to_name(ret));
         return;
     }
-
+    
+    signal_mem[0] = 0;
     int count = 0;
     size_t bytes_writen;
     while(1){
         uint16_t adc_val = 0; // for bit-depth 16
         adc_val = adc1_get_raw(adc_channel);
-        adc_val = adc_val << 2;
 
-        memcpy(buff + count, &adc_val, 2);
+        // Pre-emphasis
+        uint16_t signal = 0;
+        signal = preemphasis(adc_val);
+
+        signal = signal << 2; // Amplify 4 times
+
+        memcpy(buff + count, &signal, 2);
         count += 2;
         vTaskDelay(xDelay);
 
