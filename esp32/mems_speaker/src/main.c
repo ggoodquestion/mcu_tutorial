@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
+#include <limits.h>
 
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
@@ -13,8 +15,10 @@
 #define I2S_DIN 34
 
 #define BUFF_SIZE 128
+#define SAMPLE_RATE 16000
 
 #define ALPHA 0.97
+#define PI 3.14159265
 
 static int16_t r_buf[BUFF_SIZE];
 static int16_t w_buf[BUFF_SIZE];
@@ -22,6 +26,9 @@ static float memory[1] = {0};
 
 static i2s_chan_handle_t tx_chan;
 static i2s_chan_handle_t rx_chan;
+
+static double sine[SAMPLE_RATE];
+static short sine_count = 0;
 
 static void init_i2s(){
     // Initial i2s in duplex mode
@@ -59,8 +66,26 @@ void preemphasis(int16_t *xs, int16_t *y){
     }
 }
 
+void makeSineWav(int freq){
+    for(int n = 0; n < SAMPLE_RATE; n++){
+        sine[n] = 0.2 * SHRT_MAX * sin(2*PI*freq*n/SAMPLE_RATE);
+    }
+}
+
+void addSineWav(int16_t *xs, int16_t *y){
+    double tmp = 0.0;
+    for(int n = 0; n < BUFF_SIZE; n+=2){
+        tmp = (double) xs[n] + sine[sine_count];
+        y[n] = (int16_t) tmp;
+        // printf("sine: %lf ", sine[sine_count]);
+        sine_count = (sine_count + 1) % SAMPLE_RATE;
+    }
+}
+
 void app_main(void){
     const TickType_t xDelay = 0.0625 * BUFF_SIZE / portTICK_PERIOD_MS; // 16000 sample rates
+
+    makeSineWav(500);
 
     init_i2s();
     ESP_ERROR_CHECK(i2s_channel_enable(rx_chan));
@@ -71,7 +96,8 @@ void app_main(void){
     while (1){
         vTaskDelay(xDelay);
         i2s_channel_read(rx_chan, r_buf, sizeof(r_buf), &r_bytes, portMAX_DELAY);
-        preemphasis(r_buf, w_buf);
+        // preemphasis(r_buf, w_buf);
+        addSineWav(r_buf, w_buf);
         i2s_channel_write(tx_chan, w_buf, sizeof(w_buf), &w_bytes, portMAX_DELAY);
     }
 
